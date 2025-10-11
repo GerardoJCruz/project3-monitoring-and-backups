@@ -1,0 +1,29 @@
+1.- Create and attach an IAM role to the EC2 instance. 
+This is to avoid storing AWS keys on the instances. The instance will get temporary credentials automatically. 
+
+* In AWS Console -> IAM -> Roles -> select EC2 -> attach a custom policy that allows the instance to put/list/delete objects in your backup bucket (or the managed policy AmaazonS3FullAccess for testing only).
+Attach the role to the running instance (Instance Settings -> Attach/Replace IAM role).
+
+
+
+Minimal example policy (replace my-backup-bucket with the name of your S3 bucket you previously created):
+{
+  "Version": "2012-10-17",
+  "Statement":[
+    {
+      "Effect":"Allow",
+      "Action":[
+        "s3:PutObject",
+        "s3:PutObjectAcl",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:DeleteObject"
+      ],
+      "Resource":[
+        "arn:aws:s3:::my-backup-bucket",
+        "arn:aws:s3:::my-backup-bucket/*"
+      ]
+    }
+  ]
+}
+
