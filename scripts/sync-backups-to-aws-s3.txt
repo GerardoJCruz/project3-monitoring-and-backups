@@ -4,7 +4,9 @@ This is to avoid storing AWS keys on the instances. The instance will get tempor
 * In AWS Console -> IAM -> Roles -> select EC2 -> attach a custom policy that allows the instance to put/list/delete objects in your backup bucket (or the managed policy AmaazonS3FullAccess for testing only).
 Attach the role to the running instance (Instance Settings -> Attach/Replace IAM role).
 
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+1- Create and attach an IAM role to the EC2 instance.
 
 Minimal example policy (replace my-backup-bucket with the name of your S3 bucket you previously created):
 {
@@ -27,3 +29,95 @@ Minimal example policy (replace my-backup-bucket with the name of your S3 bucket
   ]
 }
 
+After attaching, on the EC2 you can verify identity with:
+aws sts get-caller-identity
+
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+2- Install AWS CLI v2 on the instances (In this case is an Amazon Linux)
+
+# install prerequisites
+sudo yum install -y unzip curl
+
+# download and install (x86_64)
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+# check version
+aws --version
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+3- Configure and harden the S3 bucket
+
+-Enable versioning 
+aws s3api put-bucket-versioning \
+    --bucket my-backup-bucket \
+    --versioning-configuration Status=Enabled
+
+-Enable Default Server-Side Encryption
+aws s3api put-bucket-encryption \
+    --bucket my-backup-bucket \
+    --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+-Apply Lifecycle Rules. Lifecycle rules are usually defined in a JSON file first, and then the file is referenced by the command. This is the standard way to apply complex configurations via the CLI.
+
+lifecycle.json:
+{
+  "Rules": [
+    {
+      "ID": "backup-retention",
+      "Filter": {"Prefix": ""},
+      "Status": "Enabled",
+      "Transitions": [
+        {"Days": 30, "StorageClass": "STANDARD_IA"},
+        {"Days": 90, "StorageClass": "GLACIER_IR"}
+      ],
+      "Expiration": {"Days": 365}
+    }
+  ]
+}
+
+- Apply the Configuration
+aws s3api put-bucket-lifecycle-configuration \
+    --bucket my-backup-bucket \
+    --lifecycle-configuration file://lifecycle.json
+
+- Last but not least block public acces:
+aws s3api put-public-access-block \
+    --bucket my-backup-bucket \
+    --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+4- Test access from the EC2 instance.
+aws sts get-caller-identity
+
+aws s3 ls s3://my-backup-bucke
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+5- Test the sync and dry run
+-Always dry-run firts you transfer
+aws s3 sync /home/ec2-user/backups s3://my-backup-bucket/ --dryrun
+
+-NOw transfer
+aws s3 sync /home/ec2-user/backups s3://my-backup-bucket/ \
+  --storage-class STANDARD_IA \
+  --delete \
+  --only-show-errors \
+  --acl bucket-owner-full-control
+
+Verify with:
+aws s3 ls s3://my-backup-bucket
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+6- Automate the sync using cron
+-Edit root crontab:
+sudo crontab -e
+
+add the next line:
+3 sync /home/ec2-user/backups s3://my-backup-bucket/ --storage-class STANDARD_IA --delete >> /var/log/backup-sync.log 2>&1
+
+This will execute the command daily at 3:00 am 
